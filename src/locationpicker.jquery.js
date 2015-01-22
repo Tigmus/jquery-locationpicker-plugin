@@ -19,16 +19,18 @@
             location: _marker.position,
             radius: options.radius,
             locationName: options.locationName,
+            venueName: null,
+            shortAddress: null,
             addressComponents: {
                 formatted_address: null,
                 addressLine1: null,
                 addressLine2: null,
                 streetName: null,
                 streetNumber: null,
+                town: null,
                 city: null,
-                district: null,
                 state: null,
-                stateOrProvince: null
+                county: null
             },
             settings: options.settings,
             domContainer: domElement,
@@ -75,7 +77,9 @@
          * @param callback
          */
         setPosition: function(gMapContext, location, callback) {
+            console.log('[Location Picker] Setting position');
             gMapContext.location = location;
+            gMapContext.venueName = "";
             gMapContext.marker.setPosition(location);
             gMapContext.map.panTo(location);
             this.drawCircle(gMapContext, location, gMapContext.radius, {});
@@ -117,20 +121,24 @@
                     result.streetName = component.short_name;
                 }
                 // City
-                else if (component.types.indexOf('locality') >= 0) {
-                    result.city = component.short_name;
+                else if (component.types.indexOf('postal_town') >= 0) {
+                    result.city = component.long_name;
+                    result.town = component.long_name;
                 }
-                // District
-                else if (component.types.indexOf('sublocality') >= 0) {
-                    result.district = component.short_name;
+                // Town
+                else if (component.types.indexOf('neighborhood') >= 0) {
+                    result.town = component.long_name;
+                }
+                else if (component.types.indexOf('locality') >= 0) {
+                    result.town = component.long_name;
                 }
                 // State \ Province
-                else if (component.types.indexOf('administrative_area_level_1') >= 0) {
-                    result.stateOrProvince = component.short_name;
+                else if (component.types.indexOf('administrative_area_level_2') >= 0) {
+                    result.county = component.long_name;
                 }
                 // State \ Province
                 else if (component.types.indexOf('country') >= 0) {
-                    result.country = component.short_name;
+                    result.country = component.long_name;
                 }
             }
             result.addressLine1 = [result.streetNumber, result.streetName].join(' ').trim();
@@ -160,15 +168,17 @@
             inputBinding.radiusInput.val(gmapContext.radius).change();
         }
         if (inputBinding.locationNameInput) {
-            inputBinding.locationNameInput.val(gmapContext.locationName).change();
+            var shortAddress = ( gmapContext.venueName || gmapContext.addressComponents.addressLine1 )+', '+gmapContext.addressComponents.town;
+            gmapContext.shortAddress = shortAddress;
+            inputBinding.locationNameInput.val(gmapContext.shortAddress).change();
         }
     }
 
     function setupInputListenersInput(inputBinding, gmapContext) {
         if (inputBinding) {
             if (inputBinding.radiusInput){
-                inputBinding.radiusInput.on("change", function(e) {
-                    if (!e.originalEvent) { return }
+                console.log('[Location Picker] Radius search');
+                inputBinding.radiusInput.on("change", function() {
                     gmapContext.radius = $(this).val();
                     GmUtility.setPosition(gmapContext, gmapContext.location, function(context){
                         context.settings.onchanged.apply(gmapContext.domContainer,
@@ -177,6 +187,7 @@
                 });
             }
             if (inputBinding.locationNameInput && gmapContext.settings.enableAutocomplete) {
+                console.log('[Location Picker] Location name search');
                 gmapContext.autocomplete = new google.maps.places.Autocomplete(inputBinding.locationNameInput.get(0));
                 google.maps.event.addListener(gmapContext.autocomplete, 'place_changed', function() {
                     var place = gmapContext.autocomplete.getPlace();
@@ -185,38 +196,32 @@
                         return;
                     }
                     GmUtility.setPosition(gmapContext, place.geometry.location, function(context) {
+                        gmapContext.venueName = place.name;
                         updateInputValues(inputBinding, context);
                         context.settings.onchanged.apply(gmapContext.domContainer,
-                            [GmUtility.locationFromLatLng(context.location), context.radius, false]);
+                            [GmUtility.locationFromLatLng(context.location), context.venueName, context.addressComponents, false]);
                     });
                 });
             }
             if (inputBinding.latitudeInput) {
-                inputBinding.latitudeInput.on("change", function(e) {
-                    if (!e.originalEvent) { return }
+                console.log('[Location Picker] Latitude search');
+                inputBinding.latitudeInput.on("change", function() {
                     GmUtility.setPosition(gmapContext, new google.maps.LatLng($(this).val(), gmapContext.location.lng()), function(context){
                         context.settings.onchanged.apply(gmapContext.domContainer,
-                            [GmUtility.locationFromLatLng(context.location), context.radius, false]);
+                            [GmUtility.locationFromLatLng(context.location), context.addressComponents, context.radius, false]);
                     });
                 });
             }
             if (inputBinding.longitudeInput) {
-                inputBinding.longitudeInput.on("change", function(e) {
-                    if (!e.originalEvent) { return }
+                console.log('[Location Picker] Longitude search');
+                inputBinding.longitudeInput.on("change", function() {
                     GmUtility.setPosition(gmapContext, new google.maps.LatLng(gmapContext.location.lat(), $(this).val()), function(context){
                         context.settings.onchanged.apply(gmapContext.domContainer,
-                            [GmUtility.locationFromLatLng(context.location), context.radius, false]);
+                            [GmUtility.locationFromLatLng(context.location), context.addressComponents, context.radius, false]);
                     });
                 });
             }
         }
-    }
-
-    function autosize(gmapContext) {
-        google.maps.event.trigger(gmapContext.map, 'resize');
-        setTimeout(function() {
-            gmapContext.map.setCenter(gmapContext.marker.position);
-        }, 300);
     }
 
     /**
@@ -276,7 +281,7 @@
                      *  marker: marker placed on map
                      * }
                      */
-                    if (params == undefined) { // Getter
+                    if (params == undefined) { // Getter is not available
                         var locationObj = GmUtility.locationFromLatLng(gmapContext.location);
                         locationObj.formattedAddress = gmapContext.locationName;
                         locationObj.addressComponents = gmapContext.addressComponents;
@@ -285,12 +290,9 @@
                             marker: gmapContext.marker,
                             location: locationObj
                         }
-                    } else { // Setter is not available
+                    } else {
                         return null;
                     }
-                case "autosize":
-                    autosize(gmapContext);
-                    return this;
             }
             return null;
         }
@@ -319,17 +321,21 @@
             // Subscribe GMap events
             google.maps.event.addListener(gmapContext.marker, "dragend", function(event) {
                 GmUtility.setPosition(gmapContext, gmapContext.marker.position, function(context){
-                    var currentLocation = GmUtility.locationFromLatLng(gmapContext.location);
-                    context.settings.onchanged.apply(gmapContext.domContainer, [currentLocation, context.radius, true]);
+                    //var currentLocation = GmUtility.locationFromLatLng(gmapContext.location);
+                    context.settings.onchanged.apply(gmapContext.domContainer, [GmUtility.locationFromLatLng(context.location), context.venueName, context.addressComponents, true]);
                     updateInputValues(gmapContext.settings.inputBinding, gmapContext);
                 });
             });
-            GmUtility.setPosition(gmapContext, new google.maps.LatLng(settings.location.latitude, settings.location.longitude), function(context){
-                updateInputValues(settings.inputBinding, gmapContext);
-                // Set up input bindings if needed
-                setupInputListenersInput(settings.inputBinding, gmapContext);
-                context.settings.oninitialized($target);
-            });
+            if( gmapContext.shortAddress != null ){
+                GmUtility.setPosition(gmapContext, new google.maps.LatLng(settings.location.latitude, settings.location.longitude), function(context){
+                    updateInputValues(settings.inputBinding, gmapContext);
+                    context.settings.oninitialized($target);
+                    var currentLocation = GmUtility.locationFromLatLng(gmapContext.location);
+                    settings.onchanged.apply(gmapContext.domContainer, [currentLocation, context.radius, false]);
+                });
+            };
+            // Set up input bindings if needed
+            setupInputListenersInput(settings.inputBinding, gmapContext);
         });
     };
     $.fn.locationpicker.defaults = {
